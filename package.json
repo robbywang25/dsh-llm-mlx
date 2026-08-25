@@ -22,10 +22,10 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts --clean --out-dir lib",
+    "compile": "tsup src/index.ts --format esm --dts --clean --out-dir lib",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "verify:dist": "npm run build && git diff --exit-code -- lib && test -z \"$(git ls-files --others --exclude-standard -- lib)\"",
+    "verify:dist": "npm run compile && git diff --exit-code -- lib && test -z \"$(git ls-files --others --exclude-standard -- lib)\"",
     "check": "npm run typecheck && npm run test && npm run verify:dist && npm pack --dry-run"
   },
   "repository": {
