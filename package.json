@@ -24,7 +24,8 @@
     "build": "tsup src/index.ts --format esm --dts --clean --out-dir lib",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "check": "npm run typecheck && npm run test && npm run build && npm pack --dry-run"
+    "verify:dist": "npm run build && git diff --exit-code -- lib",
+    "check": "npm run typecheck && npm run test && npm run verify:dist && npm pack --dry-run"
   },
   "repository": {
     "type": "git",
