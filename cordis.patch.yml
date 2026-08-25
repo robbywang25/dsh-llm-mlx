@@ -1,0 +1,41 @@
+# Register one loopback OpenAI-compatible route through DSH's built-in pi-ai
+# adapter. User settings still merge into this base profile per provider.
+- id: llm-pi-ai
+  config:
+    providers:
+      local-mlx:
+        displayName: Local MLX
+        apiKeyEnv: DSH_MLX_API_KEY
+        api: openai-completions
+        baseURL: http://127.0.0.1:18080/v1
+        compat:
+          supportsDeveloperRole: false
+          maxTokensField: max_tokens
+        defaultContextWindow: 16384
+        defaultMaxTokens: 512
+        streamIdleTimeoutMs: 120000
+        retryPolicy:
+          mode: normal
+          maxRetries: 1
+        models:
+          - id: default_model
+            name: MLX Local Model
+            contextWindow: 16384
+            maxTokens: 512
+
+# Optionally own the mlx_lm.server process. With no DSH_MLX_MODEL_PATH the
+# provider reuses an independently managed server at the endpoint above.
+- insert:
+    - id: llm-mlx-runtime
+      name: dsh-llm-mlx
+      config:
+        autoStart: !!js Boolean(process.env.DSH_MLX_MODEL_PATH)
+        modelPath: !!js process.env.DSH_MLX_MODEL_PATH
+        pythonExecutable: !!js process.env.DSH_MLX_PYTHON ?? 'python3'
+        port: 18080
+        startupTimeoutMs: 90000
+        maxTokens: 512
+        temperature: 0.6
+        topP: 0.8
+        topK: 20
+        disableThinking: true
