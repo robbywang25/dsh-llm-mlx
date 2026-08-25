@@ -6,6 +6,7 @@ import { resolveConfig } from '../src/config.js'
 import {
   buildServerArgs,
   ensureMlxRuntime,
+  isHealthyPayload,
   type RuntimeDependencies,
   type RuntimeLogger,
 } from '../src/runtime.js'
@@ -49,6 +50,35 @@ describe('buildServerArgs', () => {
     expect(args).toContain('/Models/Qwen 3')
     expect(args.slice(args.indexOf('--host'), args.indexOf('--host') + 2)).toEqual(['--host', '127.0.0.1'])
     expect(args).toContain('{"enable_thinking":false}')
+  })
+
+  it('starts mlx-vlm through its module without mlx-lm-only sampling flags', () => {
+    const config = resolveConfig({
+      autoStart: true,
+      serverEngine: 'mlx-vlm',
+      modelPath: '/Models/Qwen VL',
+      disableThinking: false,
+    })
+    const args = buildServerArgs(config)
+    expect(args.slice(0, 2)).toEqual(['-m', 'mlx_vlm.server'])
+    expect(args).toContain('/Models/Qwen VL')
+    expect(args.slice(args.indexOf('--host'), args.indexOf('--host') + 2)).toEqual(['--host', '127.0.0.1'])
+    expect(args).toContain('--max-tokens')
+    expect(args).toContain('--enable-thinking')
+    expect(args).not.toContain('--temp')
+    expect(args).not.toContain('--chat-template-args')
+  })
+})
+
+describe('isHealthyPayload', () => {
+  it('accepts MLX-LM and MLX-VLM health shapes', () => {
+    expect(isHealthyPayload({ status: 'ok' })).toBe(true)
+    expect(isHealthyPayload({ status: 'healthy', loaded_model: null })).toBe(true)
+  })
+
+  it('rejects unrelated or malformed payloads', () => {
+    expect(isHealthyPayload({ status: 'starting' })).toBe(false)
+    expect(isHealthyPayload('ok')).toBe(false)
   })
 })
 

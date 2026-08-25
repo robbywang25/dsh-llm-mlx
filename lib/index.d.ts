@@ -3,8 +3,10 @@ import z from '@deepseek-ai/schemastery';
 import { ChildProcess } from 'node:child_process';
 
 type MlxLogLevel = 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL';
+type MlxServerEngine = 'mlx-lm' | 'mlx-vlm';
 interface ResolvedConfig {
     readonly autoStart: boolean;
+    readonly serverEngine: MlxServerEngine;
     readonly modelPath?: string;
     readonly pythonExecutable: string;
     readonly host: '127.0.0.1';
@@ -18,11 +20,13 @@ interface ResolvedConfig {
     readonly logLevel: MlxLogLevel;
 }
 interface Config {
-    /** Start and own mlx_lm.server instead of reusing an already-running endpoint. */
+    /** Start and own an MLX server instead of reusing an already-running endpoint. */
     autoStart?: boolean;
+    /** Python server implementation used for managed startup. */
+    serverEngine?: MlxServerEngine;
     /** Absolute path to a local MLX model directory. Required when autoStart is true. */
     modelPath?: string;
-    /** Python executable or absolute interpreter path containing mlx-lm. */
+    /** Python executable or absolute interpreter path containing the selected server package. */
     pythonExecutable?: string;
     /** Loopback TCP port used by both the server and provider profile. */
     port?: number;
@@ -69,11 +73,13 @@ interface RuntimeDependencies {
 declare function endpointFor(config: ResolvedConfig): string;
 declare function healthUrlFor(config: ResolvedConfig): string;
 declare function buildServerArgs(config: ResolvedConfig): string[];
-/** Reuse a healthy loopback server or start and own one local mlx_lm process. */
+/** Accept the health payloads used by both supported local server packages. */
+declare function isHealthyPayload(body: unknown): boolean;
+/** Reuse a healthy loopback server or start and own one local MLX server process. */
 declare function ensureMlxRuntime(config: ResolvedConfig, logger: RuntimeLogger, dependencies?: RuntimeDependencies): Promise<RuntimeHandle>;
 
 declare const name = "llm-mlx-runtime";
 /** Mount the optional server owner; the provider route itself comes from the bundle patch. */
 declare function apply(ctx: Context, config: Config): void;
 
-export { Config, Config as PluginConfig, type ResolvedConfig, type RuntimeDependencies, type RuntimeHandle, type RuntimeLogger, apply, buildServerArgs, endpointFor, ensureMlxRuntime, healthUrlFor, name, resolveConfig };
+export { Config, Config as PluginConfig, type ResolvedConfig, type RuntimeDependencies, type RuntimeHandle, type RuntimeLogger, apply, buildServerArgs, endpointFor, ensureMlxRuntime, healthUrlFor, isHealthyPayload, name, resolveConfig };

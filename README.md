@@ -2,10 +2,11 @@
 
 [中文](README.zh.md)
 
-Use a local [MLX-LM](https://github.com/ml-explore/mlx-lm) model as a
-DeepSeek Harness provider. The plugin contributes a `local-mlx` model route
-through DSH's built-in OpenAI-compatible adapter and can optionally start and
-own `mlx_lm.server` for the lifetime of the DSH process.
+Use a local [MLX-LM](https://github.com/ml-explore/mlx-lm) or
+[MLX-VLM](https://github.com/Blaizzy/mlx-vlm) model as a DeepSeek Harness
+provider. The plugin contributes a `local-mlx` model route through DSH's
+built-in OpenAI-compatible adapter and can optionally start and own
+`mlx_lm.server` or `mlx_vlm.server` for the lifetime of the DSH process.
 
 No model weights are included. Managed startup is limited to Apple-silicon
 macOS and binds the server to `127.0.0.1`.
@@ -14,7 +15,8 @@ macOS and binds the server to `127.0.0.1`.
 
 - Apple-silicon macOS for managed MLX startup.
 - DeepSeek Harness `0.1.0-rc.6` or `0.1.1-rc.1+`.
-- A local Python environment with `mlx-lm` and a downloaded MLX model.
+- A local Python environment with `mlx-lm` or `mlx-vlm`, matching the selected
+  model, and a downloaded MLX model.
 
 The provider can also reuse an independently managed OpenAI-compatible server
 at `http://127.0.0.1:18080/v1`; in that mode DSH does not own its process.
@@ -36,7 +38,7 @@ dsh plugin --profile desktop add github:robbywang25/dsh-llm-mlx
 The package ships committed `lib/` output and has no install lifecycle script.
 It can also be installed from dsh-market after the catalog entry is published.
 
-## Option A: reuse an existing MLX-LM server
+## Option A: reuse an existing MLX server
 
 Start the server from the Python environment that contains `mlx-lm`:
 
@@ -49,14 +51,24 @@ python -m mlx_lm server \
   --chat-template-args '{"enable_thinking":false}'
 ```
 
+For a vision-language model, use an environment containing `mlx-vlm`:
+
+```bash
+python -m mlx_vlm.server \
+  --model /absolute/path/to/your-mlx-vlm-model \
+  --host 127.0.0.1 \
+  --port 18080 \
+  --max-tokens 512
+```
+
 Then open DSH **Settings → Models → Local MLX** and enter any non-empty local
-placeholder such as `local-only`. MLX-LM does not require this value; the
-generic OpenAI client requires a non-empty API-key field. The value is sent
-only to the loopback endpoint.
+placeholder such as `local-only`. The local MLX servers do not require this
+value; the generic OpenAI client requires a non-empty API-key field. The value
+is sent only to the loopback endpoint.
 
 Create a new session and choose **MLX Local Model**.
 
-## Option B: let DSH own the MLX-LM server
+## Option B: let DSH own the MLX server
 
 Set these variables before starting DSH:
 
@@ -66,10 +78,11 @@ export DSH_MLX_PYTHON=/absolute/path/to/python
 dsh web
 ```
 
-`DSH_MLX_MODEL_PATH` enables managed startup. The plugin checks for local model
-configuration, tokenizer configuration, and safetensors weights before it
-spawns Python. It reuses an already healthy server on port `18080`, refuses an
-occupied unhealthy port, and terminates only a server process that it started.
+`DSH_MLX_MODEL_PATH` enables managed `mlx-lm` startup by default. The plugin
+checks for local model configuration, tokenizer configuration, and safetensors
+weights before it spawns Python. It reuses an already healthy server on port
+`18080`, refuses an occupied unhealthy port, and terminates only a server
+process that it started.
 
 For a persistent machine-local profile setting, add this to that profile's
 `cordis.patch.yml` instead of exporting variables:
@@ -78,9 +91,14 @@ For a persistent machine-local profile setting, add this to that profile's
 - id: llm-mlx-runtime
   config:
     autoStart: true
+    serverEngine: mlx-lm
     modelPath: /absolute/path/to/your-mlx-model
     pythonExecutable: /absolute/path/to/python
 ```
+
+Set `serverEngine: mlx-vlm` for a vision-language model. MLX-VLM managed
+startup uses its own module and supported server flags; MLX-LM-only sampling
+flags are not passed to it.
 
 Do not commit a user-specific model path to a public repository.
 
@@ -88,6 +106,7 @@ Do not commit a user-specific model path to a public repository.
 
 | Setting | Default |
 | --- | --- |
+| Managed server engine | `mlx-lm` |
 | Provider | `local-mlx` |
 | Model id | `default_model` |
 | API base URL | `http://127.0.0.1:18080/v1` |
@@ -114,8 +133,8 @@ URL.
 - Unloading the plugin stops only the child process that the plugin owns. An
   independently managed server is never stopped.
 
-The MLX-LM HTTP server describes itself as a development server. Keep it on
-loopback and do not expose it directly to an untrusted network.
+The MLX HTTP servers are local development servers. Keep them on loopback and
+do not expose them directly to an untrusted network.
 
 ## Verify
 
@@ -149,5 +168,5 @@ from DSH's Models settings after uninstalling.
 
 ## License
 
-MIT. MLX-LM and each model keep their own licenses; this repository does not
-redistribute either one.
+MIT. MLX-LM, MLX-VLM, and each model keep their own licenses; this repository
+does not redistribute them.

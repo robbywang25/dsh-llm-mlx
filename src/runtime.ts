@@ -46,6 +46,18 @@ export function buildServerArgs(config: ResolvedConfig): string[] {
   if (config.modelPath === undefined) {
     throw new Error('dsh-llm-mlx: cannot build server arguments without modelPath')
   }
+  if (config.serverEngine === 'mlx-vlm') {
+    const args = [
+      '-m', 'mlx_vlm.server',
+      '--model', config.modelPath,
+      '--host', config.host,
+      '--port', String(config.port),
+      '--max-tokens', String(config.maxTokens),
+      '--log-level', config.logLevel,
+    ]
+    if (!config.disableThinking) args.push('--enable-thinking')
+    return args
+  }
   const args = [
     '-m', 'mlx_lm', 'server',
     '--model', config.modelPath,
@@ -85,10 +97,17 @@ async function isHealthy(url: string): Promise<boolean> {
     const response = await fetch(url, { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) })
     if (!response.ok) return false
     const body: unknown = await response.json()
-    return typeof body === 'object' && body !== null && (body as { status?: unknown }).status === 'ok'
+    return isHealthyPayload(body)
   } catch {
     return false
   }
+}
+
+/** Accept the health payloads used by both supported local server packages. */
+export function isHealthyPayload(body: unknown): boolean {
+  if (typeof body !== 'object' || body === null) return false
+  const status = (body as { status?: unknown }).status
+  return status === 'ok' || status === 'healthy'
 }
 
 async function isPortOpen(host: string, port: number): Promise<boolean> {
@@ -160,7 +179,7 @@ function exitDescription(state: ExitState): string {
   return `exit code ${String(state.code)}`
 }
 
-/** Reuse a healthy loopback server or start and own one local mlx_lm process. */
+/** Reuse a healthy loopback server or start and own one local MLX server process. */
 export async function ensureMlxRuntime(
   config: ResolvedConfig,
   logger: RuntimeLogger,
@@ -213,10 +232,10 @@ export async function ensureMlxRuntime(
       dependencies.sleep(HEALTH_POLL_MS).then(() => ({ kind: 'tick' as const })),
     ])
     if (state.kind === 'exit') {
-      throw new Error(`dsh-llm-mlx: mlx_lm.server stopped during startup (${exitDescription(state.value)})`)
+      throw new Error(`dsh-llm-mlx: ${config.serverEngine} server stopped during startup (${exitDescription(state.value)})`)
     }
   }
 
   await terminate(child, exit, dependencies.sleep)
-  throw new Error(`dsh-llm-mlx: mlx_lm.server did not become healthy within ${String(config.startupTimeoutMs)} ms`)
+  throw new Error(`dsh-llm-mlx: ${config.serverEngine} server did not become healthy within ${String(config.startupTimeoutMs)} ms`)
 }

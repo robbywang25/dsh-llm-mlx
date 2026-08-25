@@ -9,13 +9,16 @@ export const DEFAULT_TOP_P = 0.8
 export const DEFAULT_TOP_K = 20
 
 export type MlxLogLevel = 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL'
+export type MlxServerEngine = 'mlx-lm' | 'mlx-vlm'
 
 export interface Config {
-  /** Start and own mlx_lm.server instead of reusing an already-running endpoint. */
+  /** Start and own an MLX server instead of reusing an already-running endpoint. */
   autoStart?: boolean
+  /** Python server implementation used for managed startup. */
+  serverEngine?: MlxServerEngine
   /** Absolute path to a local MLX model directory. Required when autoStart is true. */
   modelPath?: string
-  /** Python executable or absolute interpreter path containing mlx-lm. */
+  /** Python executable or absolute interpreter path containing the selected server package. */
   pythonExecutable?: string
   /** Loopback TCP port used by both the server and provider profile. */
   port?: number
@@ -37,6 +40,7 @@ export interface Config {
 
 export interface ResolvedConfig {
   readonly autoStart: boolean
+  readonly serverEngine: MlxServerEngine
   readonly modelPath?: string
   readonly pythonExecutable: string
   readonly host: '127.0.0.1'
@@ -52,6 +56,7 @@ export interface ResolvedConfig {
 
 export const Config: z<Config> = z.object({
   autoStart: z.boolean().default(false),
+  serverEngine: z.union(['mlx-lm', 'mlx-vlm'] as const).default('mlx-lm'),
   modelPath: z.string(),
   pythonExecutable: z.string().default('python3'),
   port: z.number().step(1).min(1024).max(65535).default(DEFAULT_PORT),
@@ -87,6 +92,7 @@ export function resolveConfig(config: Config): ResolvedConfig {
 
   return {
     autoStart,
+    serverEngine: config.serverEngine ?? 'mlx-lm',
     ...(modelPath === undefined ? {} : { modelPath }),
     pythonExecutable: cleanString(config.pythonExecutable ?? 'python3', 'pythonExecutable'),
     host: '127.0.0.1',

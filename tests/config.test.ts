@@ -10,6 +10,7 @@ describe('resolveConfig', () => {
   it('keeps managed startup off and fixes the host to loopback by default', () => {
     expect(resolveConfig({})).toEqual({
       autoStart: false,
+      serverEngine: 'mlx-lm',
       pythonExecutable: 'python3',
       host: '127.0.0.1',
       port: DEFAULT_PORT,
