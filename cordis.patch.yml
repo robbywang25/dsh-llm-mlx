@@ -1,5 +1,17 @@
+# DSH Desktop 2.0.3 resolves node-pty's spawn helper below a duplicated
+# `app.asar.unpacked.unpacked` path. Use the identical upstream subprocess
+# runtime from this plugin's dependency tree on macOS; other hosts stay stock.
+- id: subprocess
+  disabled: !!js process.platform === 'darwin'
+
+- insert:
+    - id: subprocess-macos-desktop
+      name: dsh-llm-mlx/macos-subprocess-fix
+      disabled: !!js process.platform !== 'darwin'
+
 # Register one loopback OpenAI-compatible route through DSH's built-in pi-ai
 # adapter. User settings still merge into this base profile per provider.
+
 - id: llm-pi-ai
   config:
     providers:

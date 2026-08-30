@@ -11,6 +11,12 @@
 仓库不包含任何模型权重。托管启动仅支持 Apple 芯片 macOS，服务固定绑定
 `127.0.0.1`。
 
+本 bundle 还会在 macOS 上用插件依赖树里的同一份上游实现替换 DSH Desktop
+2.0.3 的 subprocess provider，规避 packaged `node-pty` 把
+`app.asar.unpacked` 再改成不存在的 `app.asar.unpacked.unpacked` 路径。Read
+Only／Workspace Write 仍走 DSH 内置 Seatbelt 隔离；Linux 与 Windows 的进程
+provider 不变。
+
 ## 前置条件
 
 - 托管 MLX 启动需要 Apple 芯片 macOS。
@@ -122,6 +128,7 @@ tokenizer 配置和 safetensors 权重，然后才启动 Python。若 `18080` �
 - Python 使用参数数组启动，不经过 shell。
 - 插件不上传权重、prompt、回复、凭据或遥测。
 - `DSH_MLX_API_KEY` 只是本机占位符，不是外部凭据。
+- macOS PTY 兼容 provider 只改变同一份上游 subprocess 实现及其原生 helper 的加载位置，不削弱 DSH 权限 preset，也不绕过 Seatbelt。
 - 插件卸载时只停止自己创建的子进程，不会停止独立管理的服务。
 
 MLX HTTP 服务用于本机开发。请只在回环地址使用，不要直接暴露到
@@ -133,6 +140,10 @@ MLX HTTP 服务用于本机开发。请只在回环地址使用，不要直接�
 curl --fail http://127.0.0.1:18080/health
 curl --fail http://127.0.0.1:18080/v1/models
 ```
+
+对于受影响的 DSH Desktop 版本，还需分别在 Full Access 与 Read Only 下用 `pwd`
+等无副作用命令验证 Bash。Read Only 必须报告 Seatbelt 隔离成功，不能静默退化为
+无隔离执行。
 
 最终验收必须是：新建 DSH 会话，选择 **MLX Local Model**，并实际收到模型回复。
 只有模型卡可见或 health 返回 `200`，都不等于完整 DSH 链路通过。

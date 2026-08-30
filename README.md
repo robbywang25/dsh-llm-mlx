@@ -11,6 +11,13 @@ built-in OpenAI-compatible adapter and can optionally start and own
 No model weights are included. Managed startup is limited to Apple-silicon
 macOS and binds the server to `127.0.0.1`.
 
+The bundle also replaces DSH Desktop 2.0.3's macOS subprocess provider with the
+same upstream implementation loaded from the plugin dependency tree. This
+avoids a packaged `node-pty` path rewrite from `app.asar.unpacked` to the
+nonexistent `app.asar.unpacked.unpacked` directory. Read Only and Workspace
+Write still use DSH's built-in Seatbelt confinement. Linux and Windows process
+providers are unchanged.
+
 ## Requirements
 
 - Apple-silicon macOS for managed MLX startup.
@@ -130,6 +137,9 @@ URL.
 - The plugin does not upload weights, prompts, responses, credentials, or
   telemetry.
 - The placeholder `DSH_MLX_API_KEY` is not an external credential.
+- The macOS PTY compatibility provider changes only where the identical
+  upstream subprocess implementation and its native helper are loaded from;
+  it does not weaken DSH permission presets or bypass Seatbelt.
 - Unloading the plugin stops only the child process that the plugin owns. An
   independently managed server is never stopped.
 
@@ -142,6 +152,11 @@ do not expose them directly to an untrusted network.
 curl --fail http://127.0.0.1:18080/health
 curl --fail http://127.0.0.1:18080/v1/models
 ```
+
+On affected DSH Desktop builds, verify Bash separately in both Full Access and
+Read Only with a no-side-effect command such as `pwd`. Read Only must report
+successful Seatbelt enforcement rather than silently falling back to an
+unconfined process.
 
 The final acceptance test is a new DSH session that has **MLX Local Model**
 selected and receives a real reply. A visible model card or a `200` health
