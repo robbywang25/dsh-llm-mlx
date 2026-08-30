@@ -13,6 +13,7 @@ interface ResolvedConfig {
     readonly port: number;
     readonly startupTimeoutMs: number;
     readonly maxTokens: number;
+    readonly maxNumSeqs?: number;
     readonly temperature: number;
     readonly topP: number;
     readonly topK: number;
@@ -34,6 +35,8 @@ interface Config {
     startupTimeoutMs?: number;
     /** Default generation limit passed to mlx_lm.server. */
     maxTokens?: number;
+    /** Optional MLX-VLM continuous-batch concurrency limit. */
+    maxNumSeqs?: number;
     /** Default sampling temperature passed to mlx_lm.server. */
     temperature?: number;
     /** Default nucleus-sampling threshold passed to mlx_lm.server. */

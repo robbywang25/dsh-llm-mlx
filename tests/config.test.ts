@@ -34,4 +34,9 @@ describe('resolveConfig', () => {
     expect(() => resolveConfig({ pythonExecutable: 'python3\n--version' })).toThrow(/plain-text/)
     expect(() => resolveConfig({ modelPath: '/models/ok\0bad' })).toThrow(/plain-text/)
   })
+
+  it('accepts an explicit MLX-VLM concurrency limit', () => {
+    expect(resolveConfig({ serverEngine: 'mlx-vlm', maxNumSeqs: 1 }).maxNumSeqs).toBe(1)
+    expect(() => resolveConfig({ maxNumSeqs: 1 })).toThrow(/only by mlx-vlm/)
+  })
 })

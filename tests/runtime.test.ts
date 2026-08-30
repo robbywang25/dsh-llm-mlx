@@ -57,6 +57,7 @@ describe('buildServerArgs', () => {
       autoStart: true,
       serverEngine: 'mlx-vlm',
       modelPath: '/Models/Qwen VL',
+      maxNumSeqs: 1,
       disableThinking: false,
     })
     const args = buildServerArgs(config)
@@ -64,6 +65,9 @@ describe('buildServerArgs', () => {
     expect(args).toContain('/Models/Qwen VL')
     expect(args.slice(args.indexOf('--host'), args.indexOf('--host') + 2)).toEqual(['--host', '127.0.0.1'])
     expect(args).toContain('--max-tokens')
+    expect(args.slice(args.indexOf('--max-num-seqs'), args.indexOf('--max-num-seqs') + 2)).toEqual([
+      '--max-num-seqs', '1',
+    ])
     expect(args).toContain('--enable-thinking')
     expect(args).not.toContain('--temp')
     expect(args).not.toContain('--chat-template-args')

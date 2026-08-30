@@ -105,7 +105,9 @@ For a persistent machine-local profile setting, add this to that profile's
 
 Set `serverEngine: mlx-vlm` for a vision-language model. MLX-VLM managed
 startup uses its own module and supported server flags; MLX-LM-only sampling
-flags are not passed to it.
+flags are not passed to it. Set `maxNumSeqs: 1` when a memory-constrained Mac
+must serialize concurrent agent requests instead of decoding an unbounded
+continuous batch.
 
 Do not commit a user-specific model path to a public repository.
 
@@ -114,6 +116,7 @@ Do not commit a user-specific model path to a public repository.
 | Setting | Default |
 | --- | --- |
 | Managed server engine | `mlx-lm` |
+| MLX-VLM concurrent sequences | server default; optional `maxNumSeqs` |
 | Provider | `local-mlx` |
 | Model id | `default_model` |
 | API base URL | `http://127.0.0.1:18080/v1` |

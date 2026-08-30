@@ -55,6 +55,9 @@ export function buildServerArgs(config: ResolvedConfig): string[] {
       '--max-tokens', String(config.maxTokens),
       '--log-level', config.logLevel,
     ]
+    if (config.maxNumSeqs !== undefined) {
+      args.push('--max-num-seqs', String(config.maxNumSeqs))
+    }
     if (!config.disableThinking) args.push('--enable-thinking')
     return args
   }

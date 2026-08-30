@@ -100,7 +100,9 @@ tokenizer 配置和 safetensors 权重，然后才启动 Python。若 `18080` �
 ```
 
 视觉语言模型设置 `serverEngine: mlx-vlm`。托管启动会改用 MLX-VLM 模块及其
-支持的服务参数，不会把 MLX-LM 专属采样参数传给它。
+支持的服务参数，不会把 MLX-LM 专属采样参数传给它。内存受限的 Mac 若需要把
+多个 Agent 请求改为串行排队，可设置 `maxNumSeqs: 1`，避免无上限 continuous
+batch 同时解码。
 
 不要把某位用户的本机模型路径提交到公共仓库。
 
@@ -109,6 +111,7 @@ tokenizer 配置和 safetensors 权重，然后才启动 Python。若 `18080` �
 | 设置 | 默认值 |
 | --- | --- |
 | 托管服务引擎 | `mlx-lm` |
+| MLX-VLM 并发序列 | 使用服务默认值；可选 `maxNumSeqs` |
 | Provider | `local-mlx` |
 | 模型 ID | `default_model` |
 | API Base URL | `http://127.0.0.1:18080/v1` |
