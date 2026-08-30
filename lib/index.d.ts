@@ -14,6 +14,8 @@ interface ResolvedConfig {
     readonly startupTimeoutMs: number;
     readonly maxTokens: number;
     readonly maxNumSeqs?: number;
+    readonly ccSwitchProxyPort?: number;
+    readonly ccSwitchChatOnly: boolean;
     readonly temperature: number;
     readonly topP: number;
     readonly topK: number;
@@ -37,6 +39,10 @@ interface Config {
     maxTokens?: number;
     /** Optional MLX-VLM continuous-batch concurrency limit. */
     maxNumSeqs?: number;
+    /** Optional loopback port for the CC Switch OpenAI-SSE compatibility proxy. */
+    ccSwitchProxyPort?: number;
+    /** Replace agent instructions and remove tool traffic for a least-privilege chat-only route. */
+    ccSwitchChatOnly?: boolean;
     /** Default sampling temperature passed to mlx_lm.server. */
     temperature?: number;
     /** Default nucleus-sampling threshold passed to mlx_lm.server. */
@@ -81,8 +87,45 @@ declare function isHealthyPayload(body: unknown): boolean;
 /** Reuse a healthy loopback server or start and own one local MLX server process. */
 declare function ensureMlxRuntime(config: ResolvedConfig, logger: RuntimeLogger, dependencies?: RuntimeDependencies): Promise<RuntimeHandle>;
 
+interface CcSwitchProxyLogger {
+    info(message: string): void;
+    warn(message: string): void;
+}
+interface CcSwitchProxyHandle {
+    readonly endpoint: string;
+    dispose(): Promise<void>;
+}
+interface CcSwitchProxyOptions {
+    /** Replace agent instructions and remove tool traffic, keeping Claude Desktop chat-only. */
+    readonly chatOnly?: boolean;
+    /** Log only request shape and timing; never message text, headers, or credentials. */
+    readonly diagnostics?: boolean;
+}
+/**
+ * CC Switch 3.20.x aliases `reasoning_content` to `reasoning` while decoding
+ * OpenAI SSE chunks. Some MLX-VLM releases emit both keys, which serde treats
+ * as a duplicate field and drops. Keep the preferred key and preserve a
+ * non-null legacy value if that is the only reasoning payload.
+ */
+declare function normalizeCcSwitchOpenAiChunk(value: unknown): unknown;
+/** Replace agent instructions while preserving user and ordinary assistant message text. */
+interface ChatSanitizationResult {
+    readonly value: unknown;
+    readonly removedTools: number;
+    readonly replacedAgentMessages: number;
+    readonly removedToolMessages: number;
+}
+declare function sanitizeCcSwitchChatRequest(value: unknown): ChatSanitizationResult;
+/** Normalize complete SSE text while preserving its newline convention. */
+declare function normalizeCcSwitchSseBlock(block: string): string;
+/**
+ * Start a loopback-only reverse proxy that makes MLX-VLM OpenAI SSE compatible
+ * with CC Switch without changing the model server or the signed desktop app.
+ */
+declare function startCcSwitchCompatibilityProxy(upstreamEndpoint: string, listenPort: number, logger: CcSwitchProxyLogger, options?: CcSwitchProxyOptions): Promise<CcSwitchProxyHandle>;
+
 declare const name = "llm-mlx-runtime";
 /** Mount the optional server owner; the provider route itself comes from the bundle patch. */
 declare function apply(ctx: Context, config: Config): void;
 
-export { Config, Config as PluginConfig, type ResolvedConfig, type RuntimeDependencies, type RuntimeHandle, type RuntimeLogger, apply, buildServerArgs, endpointFor, ensureMlxRuntime, healthUrlFor, isHealthyPayload, name, resolveConfig };
+export { type CcSwitchProxyHandle, type CcSwitchProxyLogger, type CcSwitchProxyOptions, Config, Config as PluginConfig, type ResolvedConfig, type RuntimeDependencies, type RuntimeHandle, type RuntimeLogger, apply, buildServerArgs, endpointFor, ensureMlxRuntime, healthUrlFor, isHealthyPayload, name, normalizeCcSwitchOpenAiChunk, normalizeCcSwitchSseBlock, resolveConfig, sanitizeCcSwitchChatRequest, startCcSwitchCompatibilityProxy };

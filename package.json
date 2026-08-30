@@ -1,6 +1,6 @@
 {
   "name": "dsh-llm-mlx",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "DeepSeek Harness plugin for local MLX-LM and MLX-VLM models with loopback-only defaults, managed startup, and a macOS Desktop PTY compatibility provider",
   "type": "module",
   "main": "./lib/index.js",

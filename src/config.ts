@@ -28,6 +28,10 @@ export interface Config {
   maxTokens?: number
   /** Optional MLX-VLM continuous-batch concurrency limit. */
   maxNumSeqs?: number
+  /** Optional loopback port for the CC Switch OpenAI-SSE compatibility proxy. */
+  ccSwitchProxyPort?: number
+  /** Replace agent instructions and remove tool traffic for a least-privilege chat-only route. */
+  ccSwitchChatOnly?: boolean
   /** Default sampling temperature passed to mlx_lm.server. */
   temperature?: number
   /** Default nucleus-sampling threshold passed to mlx_lm.server. */
@@ -50,6 +54,8 @@ export interface ResolvedConfig {
   readonly startupTimeoutMs: number
   readonly maxTokens: number
   readonly maxNumSeqs?: number
+  readonly ccSwitchProxyPort?: number
+  readonly ccSwitchChatOnly: boolean
   readonly temperature: number
   readonly topP: number
   readonly topK: number
@@ -66,6 +72,8 @@ export const Config: z<Config> = z.object({
   startupTimeoutMs: z.number().step(1).min(1000).max(300_000).default(DEFAULT_STARTUP_TIMEOUT_MS),
   maxTokens: z.number().step(1).min(1).max(32_768).default(DEFAULT_MAX_TOKENS),
   maxNumSeqs: z.number().step(1).min(1).max(64),
+  ccSwitchProxyPort: z.number().step(1).min(1024).max(65535),
+  ccSwitchChatOnly: z.boolean().default(false),
   temperature: z.number().min(0).max(2).default(DEFAULT_TEMPERATURE),
   topP: z.number().min(0).max(1).default(DEFAULT_TOP_P),
   topK: z.number().step(1).min(0).max(1000).default(DEFAULT_TOP_K),
@@ -97,6 +105,12 @@ export function resolveConfig(config: Config): ResolvedConfig {
   if (config.maxNumSeqs !== undefined && serverEngine !== 'mlx-vlm') {
     throw new Error('dsh-llm-mlx: maxNumSeqs is supported only by mlx-vlm')
   }
+  if (config.ccSwitchProxyPort !== undefined && config.ccSwitchProxyPort === (config.port ?? DEFAULT_PORT)) {
+    throw new Error('dsh-llm-mlx: ccSwitchProxyPort must differ from the MLX server port')
+  }
+  if ((config.ccSwitchChatOnly ?? false) && config.ccSwitchProxyPort === undefined) {
+    throw new Error('dsh-llm-mlx: ccSwitchChatOnly requires ccSwitchProxyPort')
+  }
 
   return {
     autoStart,
@@ -108,6 +122,8 @@ export function resolveConfig(config: Config): ResolvedConfig {
     startupTimeoutMs: config.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS,
     maxTokens: config.maxTokens ?? DEFAULT_MAX_TOKENS,
     ...(config.maxNumSeqs === undefined ? {} : { maxNumSeqs: config.maxNumSeqs }),
+    ...(config.ccSwitchProxyPort === undefined ? {} : { ccSwitchProxyPort: config.ccSwitchProxyPort }),
+    ccSwitchChatOnly: config.ccSwitchChatOnly ?? false,
     temperature: config.temperature ?? DEFAULT_TEMPERATURE,
     topP: config.topP ?? DEFAULT_TOP_P,
     topK: config.topK ?? DEFAULT_TOP_K,

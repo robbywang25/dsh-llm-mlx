@@ -21,6 +21,7 @@ describe('resolveConfig', () => {
       topK: 20,
       disableThinking: true,
       logLevel: 'WARNING',
+      ccSwitchChatOnly: false,
     })
   })
 
@@ -38,5 +39,12 @@ describe('resolveConfig', () => {
   it('accepts an explicit MLX-VLM concurrency limit', () => {
     expect(resolveConfig({ serverEngine: 'mlx-vlm', maxNumSeqs: 1 }).maxNumSeqs).toBe(1)
     expect(() => resolveConfig({ maxNumSeqs: 1 })).toThrow(/only by mlx-vlm/)
+  })
+
+  it('keeps the optional CC Switch proxy on a separate loopback port', () => {
+    expect(resolveConfig({ port: 18081, ccSwitchProxyPort: 18082 }).ccSwitchProxyPort).toBe(18082)
+    expect(() => resolveConfig({ port: 18081, ccSwitchProxyPort: 18081 })).toThrow(/must differ/)
+    expect(resolveConfig({ ccSwitchProxyPort: 18082, ccSwitchChatOnly: true }).ccSwitchChatOnly).toBe(true)
+    expect(() => resolveConfig({ ccSwitchChatOnly: true })).toThrow(/requires ccSwitchProxyPort/)
   })
 })

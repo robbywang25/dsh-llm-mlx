@@ -104,6 +104,40 @@ tokenizer 配置和 safetensors 权重，然后才启动 Python。若 `18080` �
 多个 Agent 请求改为串行排队，可设置 `maxNumSeqs: 1`，避免无上限 continuous
 batch 同时解码。
 
+### 可选的 CC Switch／Claude Desktop SSE 兼容层
+
+部分 MLX-VLM 版本会在每个 OpenAI 流式 `delta` 中同时输出
+`reasoning_content` 和弃用别名 `reasoning`。CC Switch 3.20.x 用同一个 serde
+字段解析这两个名字，因重复字段而丢弃整块 SSE；因此可能出现非流式调用成功、
+Claude Desktop 却没有正文的现象。
+
+只有复现该症状时，才在第二个端口开启插件的回环兼容代理：
+
+```yaml
+- id: llm-mlx-runtime
+  config:
+    autoStart: true
+    serverEngine: mlx-vlm
+    modelPath: /模型的绝对路径
+    pythonExecutable: /Python解释器的绝对路径
+    port: 18081
+    maxNumSeqs: 1
+    ccSwitchProxyPort: 18082
+    ccSwitchChatOnly: true
+```
+
+DSH 继续指向原始模型端点；只把 CC Switch 的 Claude Desktop provider 的 OpenAI
+Chat Completions Base URL 设为 `http://127.0.0.1:18082/v1`。代理仅删除重复的弃用
+别名，其余字段逐流转发；它只绑定回环地址并随 DSH 插件停止。删除
+`ccSwitchProxyPort` 即可关闭。
+
+`ccSwitchChatOnly: true` 会把 Cowork 的 Agent／developer 指令替换为精简的本机
+聊天指令，删除 OpenAI 工具声明和工具结果消息，同时保留用户／助手对话正文。首次
+在 Claude Desktop 体验本机或解除对齐的模型时建议开启最小权限模式；即使用户只
+要求文本，Cowork 仍可能附带大量工具目录和 Agent 提示。此模式明确不支持 Cowork
+工具执行；代理不会记录消息正文或凭据。只有明确需要并已单独信任本机模型的工具
+调用时，才省略此设置。
+
 不要把某位用户的本机模型路径提交到公共仓库。
 
 ## 默认值
@@ -112,6 +146,8 @@ batch 同时解码。
 | --- | --- |
 | 托管服务引擎 | `mlx-lm` |
 | MLX-VLM 并发序列 | 使用服务默认值；可选 `maxNumSeqs` |
+| CC Switch SSE 兼容代理 | 默认关闭；可选 `ccSwitchProxyPort` |
+| CC Switch 纯聊天工具边界 | 默认关闭；可选 `ccSwitchChatOnly` |
 | Provider | `local-mlx` |
 | 模型 ID | `default_model` |
 | API Base URL | `http://127.0.0.1:18080/v1` |
@@ -127,6 +163,8 @@ batch 同时解码。
 ## 安全边界
 
 - 托管服务的 host 固定为 `127.0.0.1`，插件不提供局域网或公网监听选项。
+- 可选的 CC Switch 兼容代理同样只绑定 `127.0.0.1`，只接受回环 MLX 上游，
+  不记录凭据或消息正文。
 - 模型路径必须是已存在的本机绝对路径；插件不会下载模型。
 - Python 使用参数数组启动，不经过 shell。
 - 插件不上传权重、prompt、回复、凭据或遥测。

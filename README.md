@@ -109,6 +109,45 @@ flags are not passed to it. Set `maxNumSeqs: 1` when a memory-constrained Mac
 must serialize concurrent agent requests instead of decoding an unbounded
 continuous batch.
 
+### Optional CC Switch / Claude Desktop SSE compatibility
+
+Some MLX-VLM releases serialize both `reasoning_content` and its deprecated
+`reasoning` alias in each OpenAI streaming delta. CC Switch 3.20.x treats those
+names as one serde field and drops the affected SSE chunk. Non-streaming calls
+can therefore work while Claude Desktop shows no response text.
+
+Enable the plugin's loopback compatibility proxy on a second port when that
+exact symptom is reproduced:
+
+```yaml
+- id: llm-mlx-runtime
+  config:
+    autoStart: true
+    serverEngine: mlx-vlm
+    modelPath: /absolute/path/to/your-mlx-model
+    pythonExecutable: /absolute/path/to/python
+    port: 18081
+    maxNumSeqs: 1
+    ccSwitchProxyPort: 18082
+    ccSwitchChatOnly: true
+```
+
+Keep DSH pointed at the original model endpoint. In the CC Switch Claude
+Desktop provider only, use `http://127.0.0.1:18082/v1` as the OpenAI Chat
+Completions base URL. The proxy removes only the duplicate deprecated alias,
+streams every other field unchanged, binds only to loopback, and stops with
+the DSH plugin. Omit `ccSwitchProxyPort` to disable it.
+
+`ccSwitchChatOnly: true` replaces Cowork's agent/developer instructions with a
+small local-chat instruction, removes OpenAI tool declarations and tool-result
+messages, and keeps user/assistant conversation text. Use it for
+least-privilege evaluation of a local or uncensored model in Claude Desktop;
+Cowork can otherwise expose a large tool catalog and agent prompt even when the
+user asks for a text-only answer. This mode intentionally disables Cowork tool
+execution. The proxy never logs message text or credentials. Omit the setting
+when the local model's tool use is intentionally enabled and separately
+trusted.
+
 Do not commit a user-specific model path to a public repository.
 
 ## Defaults
@@ -117,6 +156,8 @@ Do not commit a user-specific model path to a public repository.
 | --- | --- |
 | Managed server engine | `mlx-lm` |
 | MLX-VLM concurrent sequences | server default; optional `maxNumSeqs` |
+| CC Switch SSE compatibility proxy | off; optional `ccSwitchProxyPort` |
+| CC Switch chat-only tool boundary | off; optional `ccSwitchChatOnly` |
 | Provider | `local-mlx` |
 | Model id | `default_model` |
 | API base URL | `http://127.0.0.1:18080/v1` |
@@ -134,6 +175,9 @@ URL.
 
 - The managed server host is fixed to `127.0.0.1`; the plugin has no LAN or
   public bind option.
+- The optional CC Switch compatibility proxy also binds only to `127.0.0.1`,
+  accepts only a loopback MLX upstream, and never logs credentials or message
+  text.
 - Model paths must be absolute and point to existing local MLX files. The
   plugin does not download models.
 - Python is launched with an argument array, never through a shell.
