@@ -14,6 +14,7 @@ export {
   startCcSwitchCompatibilityProxy,
 } from './cc-switch-proxy.js'
 export type { CcSwitchProxyHandle, CcSwitchProxyLogger, CcSwitchProxyOptions } from './cc-switch-proxy.js'
+export type { CcSwitchProxyLimits } from './proxy-budgets.js'
 
 export const name = 'llm-mlx-runtime'
 
@@ -32,7 +33,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
         : await startCcSwitchCompatibilityProxy(runtime.endpoint, resolved.ccSwitchProxyPort, {
             info: message => ctx.logger.info(message),
             warn: message => ctx.logger.warn(message),
-          }, { chatOnly: resolved.ccSwitchChatOnly })
+          }, { chatOnly: resolved.ccSwitchChatOnly, limits: resolved.ccSwitchProxyLimits })
     } catch (error) {
       await runtime.dispose()
       throw error

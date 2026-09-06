@@ -162,6 +162,31 @@ execution. The proxy never logs message text or credentials. Omit the setting
 when the local model's tool use is intentionally enabled and separately
 trusted.
 
+The optional proxy allows 10 seconds to connect and 5 minutes from sending the
+complete request until the first response body byte. After that, each body chunk
+renews a separate 5-minute idle budget. Response headers alone do not end prefill
+waiting. There is no total generation deadline while data keeps arriving. Tune
+the budgets for slower local models without disabling the bounds:
+
+```yaml
+    ccSwitchProxyLimits:
+      connectTimeoutMs: 10000
+      firstByteTimeoutMs: 300000
+      idleTimeoutMs: 300000
+      maxSseEventBytes: 1048576
+```
+
+All settings are positive integers; timeouts support up to one hour and the SSE
+event buffer supports up to 16 MiB. The default 1 MiB limit counts UTF-8 bytes per
+event, including its separator, rather than the full stream. Normal JSON responses
+are passed through without collecting their body. Deadline failures return 504;
+oversized SSE events and broken upstream streams return 502 before output starts.
+Once output has started, the proxy terminates that incomplete response without
+appending an error payload. Clients must treat the interrupted answer as incomplete.
+Client cancellation and proxy disposal close the associated upstream requests.
+These limits apply only to the optional proxy and do not enable it or change the
+direct model route. Programmatic callers can pass the same fields in `options.limits`.
+
 Do not commit a user-specific model path to a public repository.
 
 ## Defaults

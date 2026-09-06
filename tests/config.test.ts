@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
+  Config,
   DEFAULT_MAX_TOKENS,
   DEFAULT_PORT,
   DEFAULT_STARTUP_TIMEOUT_MS,
   resolveConfig,
 } from '../src/config.js'
+import { DEFAULT_PROXY_LIMITS } from '../src/proxy-budgets.js'
 
 describe('resolveConfig', () => {
   it('keeps managed startup off and fixes the host to loopback by default', () => {
@@ -22,6 +24,7 @@ describe('resolveConfig', () => {
       disableThinking: true,
       logLevel: 'WARNING',
       ccSwitchChatOnly: false,
+      ccSwitchProxyLimits: DEFAULT_PROXY_LIMITS,
     })
   })
 
@@ -46,5 +49,17 @@ describe('resolveConfig', () => {
     expect(() => resolveConfig({ port: 18081, ccSwitchProxyPort: 18081 })).toThrow(/must differ/)
     expect(resolveConfig({ ccSwitchProxyPort: 18082, ccSwitchChatOnly: true }).ccSwitchChatOnly).toBe(true)
     expect(() => resolveConfig({ ccSwitchChatOnly: true })).toThrow(/requires ccSwitchProxyPort/)
+  })
+
+  it('retains proxy defaults around explicit overrides and rejects invalid budgets', () => {
+    expect(resolveConfig({ ccSwitchProxyLimits: { firstByteTimeoutMs: 600_000 } }).ccSwitchProxyLimits).toEqual({
+      ...DEFAULT_PROXY_LIMITS, firstByteTimeoutMs: 600_000,
+    })
+    expect(() => resolveConfig({ ccSwitchProxyLimits: { idleTimeoutMs: 0 } })).toThrow(/idleTimeoutMs/)
+    expect(() => resolveConfig({ ccSwitchProxyLimits: { maxSseEventBytes: Infinity } })).toThrow(/maxSseEventBytes/)
+    expect(resolveConfig(Config({ ccSwitchProxyLimits: { idleTimeoutMs: 250 } })).ccSwitchProxyLimits).toEqual({
+      ...DEFAULT_PROXY_LIMITS, idleTimeoutMs: 250,
+    })
+    expect(() => Config({ ccSwitchProxyLimits: { firstByteTimeoutMs: 0 } })).toThrow()
   })
 })
