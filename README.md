@@ -184,6 +184,8 @@ oversized SSE events and broken upstream streams return 502 before output starts
 Once output has started, the proxy terminates that incomplete response without
 appending an error payload. Clients must treat the interrupted answer as incomplete.
 Client cancellation and proxy disposal close the associated upstream requests.
+Malformed request URLs return 400 without opening an upstream request or exiting
+the proxy host process.
 These limits apply only to the optional proxy and do not enable it or change the
 direct model route. Programmatic callers can pass the same fields in `options.limits`.
 

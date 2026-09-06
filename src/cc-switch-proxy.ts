@@ -199,7 +199,16 @@ export async function startCcSwitchCompatibilityProxy(
 
   const server = createServer((clientRequest, clientResponse) => {
     const requestStartedAt = Date.now()
-    const requested = new URL(clientRequest.url ?? '/', 'http://loopback.invalid')
+    let requested: URL
+    try {
+      requested = new URL(clientRequest.url ?? '/', 'http://loopback.invalid')
+    } catch {
+      clientRequest.once('error', () => clientResponse.destroy())
+      clientRequest.resume()
+      clientResponse.writeHead(400, { 'content-type': 'application/json', connection: 'close' })
+      clientResponse.end(JSON.stringify({ error: 'invalid local compatibility request URL' }))
+      return
+    }
     const sanitizeChatRequest = options.chatOnly === true
       && clientRequest.method === 'POST'
       && requested.pathname.endsWith('/chat/completions')
