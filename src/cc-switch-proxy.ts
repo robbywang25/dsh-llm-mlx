@@ -1,6 +1,7 @@
 import { createServer, request as httpRequest, type IncomingHttpHeaders, type Server } from 'node:http'
 import { StringDecoder } from 'node:string_decoder'
 import { Transform, type TransformCallback } from 'node:stream'
+import { createUpstreamBudget, resolveProxyLimits, type CcSwitchProxyLimits } from './proxy-budgets.js'
 
 const LOOPBACK_HOST = '127.0.0.1'
 
@@ -19,6 +20,8 @@ export interface CcSwitchProxyOptions {
   readonly chatOnly?: boolean
   /** Log only request shape and timing; never message text, headers, or credentials. */
   readonly diagnostics?: boolean
+  /** Bounded upstream waits and per-event buffering; partial overrides retain generous defaults. */
+  readonly limits?: Partial<CcSwitchProxyLimits>
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -122,23 +125,38 @@ class CcSwitchSseNormalizer extends Transform {
   private readonly decoder = new StringDecoder('utf8')
   private buffer = ''
 
+  constructor(private readonly maxEventBytes: number) {
+    super()
+  }
+
   override _transform(chunk: Buffer, _encoding: BufferEncoding, callback: TransformCallback): void {
-    this.buffer += this.decoder.write(chunk)
-    this.flushCompleteBlocks()
-    callback()
+    try {
+      this.buffer += this.decoder.write(chunk)
+      this.flushCompleteBlocks()
+      callback()
+    } catch (error) {
+      callback(error as Error)
+    }
   }
 
   override _flush(callback: TransformCallback): void {
-    this.buffer += this.decoder.end()
-    this.flushCompleteBlocks()
-    if (this.buffer.length > 0) this.push(normalizeCcSwitchSseBlock(this.buffer))
-    this.buffer = ''
-    callback()
+    try {
+      this.buffer += this.decoder.end()
+      this.flushCompleteBlocks()
+      if (this.buffer.length > 0) this.push(normalizeCcSwitchSseBlock(this.buffer))
+      this.buffer = ''
+      callback()
+    } catch (error) {
+      callback(error as Error)
+    }
   }
 
   private flushCompleteBlocks(): void {
     while (true) {
       const next = takeSseBlock(this.buffer)
+      if (Buffer.byteLength(next?.block ?? this.buffer, 'utf8') > this.maxEventBytes) {
+        throw new Error('local MLX upstream SSE event too large')
+      }
       if (next === undefined) return
       this.push(normalizeCcSwitchSseBlock(next.block))
       this.buffer = next.rest
@@ -176,6 +194,8 @@ export async function startCcSwitchCompatibilityProxy(
   if (upstream.protocol !== 'http:' || upstream.hostname !== LOOPBACK_HOST) {
     throw new Error('dsh-llm-mlx: CC Switch compatibility proxy requires a 127.0.0.1 HTTP upstream')
   }
+  const limits = resolveProxyLimits(options.limits)
+  const activeRequests = new Set<() => void>()
 
   const server = createServer((clientRequest, clientResponse) => {
     const requestStartedAt = Date.now()
@@ -192,6 +212,38 @@ export async function startCcSwitchCompatibilityProxy(
       delete forwardedHeaders['transfer-encoding']
     }
     let upstreamResponseStream: import('node:http').IncomingMessage | undefined
+    let normalizer: CcSwitchSseNormalizer | undefined
+    let settled = false
+    const cancelUpstream = (): void => {
+      if (settled) return
+      settled = true
+      budget.finish()
+      activeRequests.delete(cancelUpstream)
+      clientRequest.unpipe(upstreamRequest)
+      upstreamResponseStream?.unpipe()
+      normalizer?.unpipe()
+      normalizer?.destroy()
+      upstreamRequest.destroy()
+      upstreamResponseStream?.destroy()
+    }
+    const fail = (status: number, message: string): void => {
+      if (settled) return
+      cancelUpstream()
+      logger.warn(`dsh-llm-mlx: CC Switch compatibility ${message}`)
+      if (clientResponse.destroyed) return
+      if (clientResponse.headersSent) {
+        // A partial SSE/JSON response cannot safely be replaced or appended to.
+        clientResponse.destroy()
+        return
+      }
+      for (const name of clientResponse.getHeaderNames()) clientResponse.removeHeader(name)
+      clientResponse.writeHead(status, { 'content-type': 'application/json', connection: 'close' })
+      clientResponse.end(JSON.stringify({ error: message }))
+    }
+    const budget = createUpstreamBudget(limits, phase => {
+      fail(504, `local MLX upstream ${phase} timeout`)
+    })
+    activeRequests.add(cancelUpstream)
     const upstreamRequest = httpRequest({
       hostname: LOOPBACK_HOST,
       port: upstream.port,
@@ -199,7 +251,15 @@ export async function startCcSwitchCompatibilityProxy(
       path: `${requested.pathname}${requested.search}`,
       headers: forwardedHeaders,
     }, upstreamResponse => {
+      if (settled) {
+        upstreamResponse.destroy()
+        return
+      }
       upstreamResponseStream = upstreamResponse
+      upstreamResponse.on('data', () => budget.bodyReceived())
+      upstreamResponse.once('end', () => budget.finish())
+      upstreamResponse.once('aborted', () => fail(502, 'local MLX upstream response interrupted'))
+      upstreamResponse.once('error', () => fail(502, 'local MLX upstream response unavailable'))
       if (options.diagnostics === true) {
         logger.info(`dsh-llm-mlx: CC Switch diagnostic upstream headers status=${String(upstreamResponse.statusCode ?? 0)} elapsedMs=${String(Date.now() - requestStartedAt)}`)
         upstreamResponse.once('data', chunk => {
@@ -207,33 +267,33 @@ export async function startCcSwitchCompatibilityProxy(
         })
       }
       const transformed = upstreamResponse.headers['content-type']?.toLowerCase().startsWith('text/event-stream') ?? false
-      clientResponse.writeHead(
-        upstreamResponse.statusCode ?? 502,
-        responseHeaders(upstreamResponse.headers, transformed),
-      )
+      // Defer sending headers until data/end, so pre-body failures still get a valid JSON error.
+      clientResponse.statusCode = upstreamResponse.statusCode ?? 502
+      for (const [name, value] of Object.entries(responseHeaders(upstreamResponse.headers, transformed))) {
+        if (value !== undefined) clientResponse.setHeader(name, value)
+      }
       if (transformed) {
-        upstreamResponse.pipe(new CcSwitchSseNormalizer()).pipe(clientResponse)
+        normalizer = new CcSwitchSseNormalizer(limits.maxSseEventBytes)
+        normalizer.once('error', () => fail(502, 'local MLX upstream SSE event too large'))
+        upstreamResponse.pipe(normalizer).pipe(clientResponse)
       } else {
         upstreamResponse.pipe(clientResponse)
       }
     })
 
-    upstreamRequest.once('error', error => {
-      if (clientResponse.destroyed) return
-      logger.warn(`dsh-llm-mlx: CC Switch compatibility upstream error (${error.message})`)
-      if (!clientResponse.headersSent) {
-        clientResponse.writeHead(502, { 'content-type': 'application/json' })
-      }
-      clientResponse.end(JSON.stringify({ error: 'local MLX upstream unavailable' }))
+    upstreamRequest.once('socket', socket => {
+      if (socket.connecting) socket.once('connect', () => budget.connected())
+      else budget.connected()
     })
-    const cancelUpstream = (): void => {
-      upstreamRequest.destroy()
-      upstreamResponseStream?.destroy()
-    }
+    upstreamRequest.once('finish', () => budget.requestFinished())
+    upstreamRequest.once('error', () => fail(502, 'local MLX upstream unavailable'))
     clientRequest.once('aborted', cancelUpstream)
-    clientResponse.once('close', () => {
-      if (!clientResponse.writableEnded) cancelUpstream()
+    clientRequest.once('error', () => {
+      cancelUpstream()
+      clientResponse.destroy()
     })
+    clientResponse.once('finish', cancelUpstream)
+    clientResponse.once('close', cancelUpstream)
 
     if (!sanitizeChatRequest) {
       clientRequest.pipe(upstreamRequest)
@@ -244,16 +304,17 @@ export async function startCcSwitchCompatibilityProxy(
     let totalBytes = 0
     const maxBodyBytes = 16 * 1024 * 1024
     clientRequest.on('data', (chunk: Buffer) => {
+      if (settled) return
       totalBytes += chunk.length
-      if (totalBytes <= maxBodyBytes) chunks.push(chunk)
+      if (totalBytes > maxBodyBytes) {
+        chunks.length = 0
+        fail(413, 'local compatibility request too large')
+      } else {
+        chunks.push(chunk)
+      }
     })
     clientRequest.once('end', () => {
-      if (totalBytes > maxBodyBytes) {
-        upstreamRequest.destroy()
-        if (!clientResponse.headersSent) clientResponse.writeHead(413, { 'content-type': 'application/json' })
-        clientResponse.end(JSON.stringify({ error: 'local compatibility request too large' }))
-        return
-      }
+      if (settled) return
       const body = Buffer.concat(chunks)
       try {
         const parsed: unknown = JSON.parse(body.toString('utf8'))
@@ -300,5 +361,11 @@ export async function startCcSwitchCompatibilityProxy(
   }
   const endpoint = `http://${LOOPBACK_HOST}:${String(address.port)}/v1`
   logger.info(`dsh-llm-mlx: CC Switch SSE compatibility proxy is listening at ${endpoint}`)
-  return { endpoint, dispose: () => closeServer(server) }
+  return {
+    endpoint,
+    dispose: async () => {
+      for (const cancel of activeRequests) cancel()
+      await closeServer(server)
+    },
+  }
 }

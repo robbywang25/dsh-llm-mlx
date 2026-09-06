@@ -1,5 +1,12 @@
 import { isAbsolute } from 'node:path'
 import z from '@deepseek-ai/schemastery'
+import {
+  DEFAULT_PROXY_LIMITS,
+  MAX_PROXY_TIMEOUT_MS,
+  MAX_SSE_EVENT_BYTES,
+  resolveProxyLimits,
+  type CcSwitchProxyLimits,
+} from './proxy-budgets.js'
 
 export const DEFAULT_PORT = 18080
 export const DEFAULT_STARTUP_TIMEOUT_MS = 90_000
@@ -32,6 +39,8 @@ export interface Config {
   ccSwitchProxyPort?: number
   /** Replace agent instructions and remove tool traffic for a least-privilege chat-only route. */
   ccSwitchChatOnly?: boolean
+  /** Optional overrides for the compatibility proxy's waits and SSE event buffer. */
+  ccSwitchProxyLimits?: Partial<CcSwitchProxyLimits>
   /** Default sampling temperature passed to mlx_lm.server. */
   temperature?: number
   /** Default nucleus-sampling threshold passed to mlx_lm.server. */
@@ -56,6 +65,7 @@ export interface ResolvedConfig {
   readonly maxNumSeqs?: number
   readonly ccSwitchProxyPort?: number
   readonly ccSwitchChatOnly: boolean
+  readonly ccSwitchProxyLimits: CcSwitchProxyLimits
   readonly temperature: number
   readonly topP: number
   readonly topK: number
@@ -74,6 +84,12 @@ export const Config: z<Config> = z.object({
   maxNumSeqs: z.number().step(1).min(1).max(64),
   ccSwitchProxyPort: z.number().step(1).min(1024).max(65535),
   ccSwitchChatOnly: z.boolean().default(false),
+  ccSwitchProxyLimits: z.object({
+    connectTimeoutMs: z.number().step(1).min(1).max(MAX_PROXY_TIMEOUT_MS).default(DEFAULT_PROXY_LIMITS.connectTimeoutMs),
+    firstByteTimeoutMs: z.number().step(1).min(1).max(MAX_PROXY_TIMEOUT_MS).default(DEFAULT_PROXY_LIMITS.firstByteTimeoutMs),
+    idleTimeoutMs: z.number().step(1).min(1).max(MAX_PROXY_TIMEOUT_MS).default(DEFAULT_PROXY_LIMITS.idleTimeoutMs),
+    maxSseEventBytes: z.number().step(1).min(1).max(MAX_SSE_EVENT_BYTES).default(DEFAULT_PROXY_LIMITS.maxSseEventBytes),
+  }),
   temperature: z.number().min(0).max(2).default(DEFAULT_TEMPERATURE),
   topP: z.number().min(0).max(1).default(DEFAULT_TOP_P),
   topK: z.number().step(1).min(0).max(1000).default(DEFAULT_TOP_K),
@@ -124,6 +140,7 @@ export function resolveConfig(config: Config): ResolvedConfig {
     ...(config.maxNumSeqs === undefined ? {} : { maxNumSeqs: config.maxNumSeqs }),
     ...(config.ccSwitchProxyPort === undefined ? {} : { ccSwitchProxyPort: config.ccSwitchProxyPort }),
     ccSwitchChatOnly: config.ccSwitchChatOnly ?? false,
+    ccSwitchProxyLimits: resolveProxyLimits(config.ccSwitchProxyLimits),
     temperature: config.temperature ?? DEFAULT_TEMPERATURE,
     topP: config.topP ?? DEFAULT_TOP_P,
     topK: config.topK ?? DEFAULT_TOP_K,

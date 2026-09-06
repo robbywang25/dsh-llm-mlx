@@ -2,6 +2,17 @@ import { Context } from '@deepseek-ai/cordis';
 import z from '@deepseek-ai/schemastery';
 import { ChildProcess } from 'node:child_process';
 
+interface CcSwitchProxyLimits {
+    /** Time allowed to establish the loopback TCP connection. */
+    readonly connectTimeoutMs: number;
+    /** Time from finishing the upstream request until its first response body byte. */
+    readonly firstByteTimeoutMs: number;
+    /** Maximum gap between response body chunks, with no total generation deadline. */
+    readonly idleTimeoutMs: number;
+    /** UTF-8 bytes per buffered SSE event, including its separator. */
+    readonly maxSseEventBytes: number;
+}
+
 type MlxLogLevel = 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL';
 type MlxServerEngine = 'mlx-lm' | 'mlx-vlm';
 interface ResolvedConfig {
@@ -16,6 +27,7 @@ interface ResolvedConfig {
     readonly maxNumSeqs?: number;
     readonly ccSwitchProxyPort?: number;
     readonly ccSwitchChatOnly: boolean;
+    readonly ccSwitchProxyLimits: CcSwitchProxyLimits;
     readonly temperature: number;
     readonly topP: number;
     readonly topK: number;
@@ -43,6 +55,8 @@ interface Config {
     ccSwitchProxyPort?: number;
     /** Replace agent instructions and remove tool traffic for a least-privilege chat-only route. */
     ccSwitchChatOnly?: boolean;
+    /** Optional overrides for the compatibility proxy's waits and SSE event buffer. */
+    ccSwitchProxyLimits?: Partial<CcSwitchProxyLimits>;
     /** Default sampling temperature passed to mlx_lm.server. */
     temperature?: number;
     /** Default nucleus-sampling threshold passed to mlx_lm.server. */
@@ -102,6 +116,8 @@ interface CcSwitchProxyOptions {
     readonly chatOnly?: boolean;
     /** Log only request shape and timing; never message text, headers, or credentials. */
     readonly diagnostics?: boolean;
+    /** Bounded upstream waits and per-event buffering; partial overrides retain generous defaults. */
+    readonly limits?: Partial<CcSwitchProxyLimits>;
 }
 /**
  * CC Switch 3.20.x aliases `reasoning_content` to `reasoning` while decoding
@@ -130,4 +146,4 @@ declare const name = "llm-mlx-runtime";
 /** Mount the optional server owner; the provider route itself comes from the bundle patch. */
 declare function apply(ctx: Context, config: Config): void;
 
-export { type CcSwitchProxyHandle, type CcSwitchProxyLogger, type CcSwitchProxyOptions, Config, type ModelIdentityStatus, Config as PluginConfig, type ResolvedConfig, type RuntimeDependencies, type RuntimeHandle, type RuntimeLogger, apply, buildServerArgs, endpointFor, ensureMlxRuntime, healthUrlFor, isHealthyPayload, name, normalizeCcSwitchOpenAiChunk, normalizeCcSwitchSseBlock, resolveConfig, sanitizeCcSwitchChatRequest, startCcSwitchCompatibilityProxy };
+export { type CcSwitchProxyHandle, type CcSwitchProxyLimits, type CcSwitchProxyLogger, type CcSwitchProxyOptions, Config, type ModelIdentityStatus, Config as PluginConfig, type ResolvedConfig, type RuntimeDependencies, type RuntimeHandle, type RuntimeLogger, apply, buildServerArgs, endpointFor, ensureMlxRuntime, healthUrlFor, isHealthyPayload, name, normalizeCcSwitchOpenAiChunk, normalizeCcSwitchSseBlock, resolveConfig, sanitizeCcSwitchChatRequest, startCcSwitchCompatibilityProxy };
