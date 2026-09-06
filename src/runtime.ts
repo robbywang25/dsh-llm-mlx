@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { access, mkdir, readdir, stat } from 'node:fs/promises'
+import { access, mkdir, readdir, realpath, stat } from 'node:fs/promises'
 import { createConnection } from 'node:net'
-import { join } from 'node:path'
+import { isAbsolute, join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { tmpdir } from 'node:os'
 import type { ResolvedConfig } from './config.js'
@@ -9,6 +9,9 @@ import type { ResolvedConfig } from './config.js'
 const HEALTH_POLL_MS = 250
 const STOP_GRACE_MS = 5_000
 const HEALTH_TIMEOUT_MS = 1_000
+const MAX_IDENTITY_BYTES = 64 * 1024
+
+export type ModelIdentityStatus = 'matched' | 'mismatched' | 'unavailable'
 
 export interface RuntimeLogger {
   info(message: string): void
@@ -27,6 +30,7 @@ export interface RuntimeDependencies {
   readonly arch: string
   inspectModel(modelPath: string): Promise<void>
   isHealthy(url: string): Promise<boolean>
+  verifyModel(endpoint: string, modelPath: string): Promise<ModelIdentityStatus>
   isPortOpen(host: string, port: number): Promise<boolean>
   spawnProcess(executable: string, args: readonly string[], env: NodeJS.ProcessEnv): ChildProcess
   sleep(milliseconds: number): Promise<void>
@@ -96,14 +100,80 @@ async function inspectModel(modelPath: string): Promise<void> {
 }
 
 async function isHealthy(url: string): Promise<boolean> {
+  return isHealthyPayload(await readIdentityJson(url))
+}
+
+async function readIdentityJson(url: string): Promise<unknown> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS)
   try {
-    const response = await fetch(url, { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) })
-    if (!response.ok) return false
-    const body: unknown = await response.json()
-    return isHealthyPayload(body)
+    const response = await fetch(url, { signal: controller.signal, redirect: 'error' })
+    if (!response.ok || response.body === null) return undefined
+    const reader = response.body.getReader()
+    const chunks: Uint8Array[] = []
+    let size = 0
+    while (true) {
+      const chunk = await reader.read()
+      if (chunk.done) break
+      size += chunk.value.byteLength
+      if (size > MAX_IDENTITY_BYTES) return undefined
+      chunks.push(chunk.value)
+    }
+    return JSON.parse(Buffer.concat(chunks, size).toString('utf8')) as unknown
   } catch {
-    return false
+    return undefined
+  } finally {
+    clearTimeout(timeout)
+    controller.abort()
   }
+}
+
+async function canonicalModelPath(path: string): Promise<string> {
+  return realpath(path).catch(() => resolve(path))
+}
+
+function modelIds(body: unknown): string[] | undefined {
+  if (typeof body !== 'object' || body === null || !('data' in body) || !Array.isArray(body.data)) return undefined
+  const ids: string[] = []
+  for (const item of body.data) {
+    if (typeof item !== 'object' || item === null || !('id' in item) ||
+        typeof item.id !== 'string' || item.id.length === 0 || /[\0\r\n]/.test(item.id)) return undefined
+    ids.push(item.id)
+  }
+  return ids
+}
+
+/** Check declared model identity, without generating text or loading a model. */
+export async function verifyModelIdentity(endpoint: string, modelPath: string): Promise<ModelIdentityStatus> {
+  let base: URL
+  try {
+    base = new URL(endpoint)
+    if (base.protocol !== 'http:' || base.hostname !== '127.0.0.1' ||
+        !['/v1', '/v1/'].includes(base.pathname) || base.username || base.password || base.search || base.hash ||
+        !isAbsolute(modelPath)) return 'unavailable'
+  } catch {
+    return 'unavailable'
+  }
+  const [health, models, expected] = await Promise.all([
+    readIdentityJson(new URL('/health', base).href),
+    readIdentityJson(new URL('/v1/models', base).href),
+    canonicalModelPath(modelPath),
+  ])
+  const ids = modelIds(models)
+  if (!isHealthyPayload(health) || ids === undefined) return 'unavailable'
+  const paths = new Set(await Promise.all(ids.filter(isAbsolute).map(canonicalModelPath)))
+  // MLX-VLM lists cached downloads as well as loaded models. Prefer its
+  // explicit active model; a downloaded alternative is not proof of reuse.
+  if (typeof health === 'object' && health !== null && 'loaded_model' in health) {
+    const loaded = health.loaded_model
+    if (typeof loaded !== 'string' || !isAbsolute(loaded) || /[\0\r\n]/.test(loaded)) return 'unavailable'
+    if (await canonicalModelPath(loaded) !== expected) return 'mismatched'
+    return paths.has(expected) ? 'matched' : 'unavailable'
+  }
+  // MLX-LM advertises cached Hub repo IDs plus the absolute path of its
+  // configured local default. Multiple local paths leave that default unknown.
+  if (paths.size !== 1) return 'unavailable'
+  return paths.has(expected) ? 'matched' : 'mismatched'
 }
 
 /** Accept the health payloads used by both supported local server packages. */
@@ -132,6 +202,7 @@ const defaultDependencies: RuntimeDependencies = {
   arch: process.arch,
   inspectModel,
   isHealthy,
+  verifyModel: verifyModelIdentity,
   isPortOpen,
   spawnProcess(executable, args, env) {
     return spawn(executable, args, {
@@ -191,6 +262,14 @@ export async function ensureMlxRuntime(
   const endpoint = endpointFor(config)
   const healthUrl = healthUrlFor(config)
   if (await dependencies.isHealthy(healthUrl)) {
+    if (config.modelPath !== undefined) {
+      const identity = await dependencies.verifyModel(endpoint, config.modelPath)
+      if (identity !== 'matched') {
+        throw new Error(identity === 'mismatched'
+          ? `dsh-llm-mlx: healthy server at ${endpoint} reports a different model; existing process was not changed`
+          : `dsh-llm-mlx: cannot verify configured modelPath at ${endpoint}; existing process was not changed`)
+      }
+    }
     logger.info(`dsh-llm-mlx: reusing healthy loopback server at ${endpoint}`)
     return { mode: 'reused', endpoint, dispose: async () => undefined }
   }
@@ -220,25 +299,37 @@ export async function ensureMlxRuntime(
   const exit = observeExit(child)
   const deadline = dependencies.now() + config.startupTimeoutMs
 
-  while (dependencies.now() < deadline) {
-    if (await dependencies.isHealthy(healthUrl)) {
-      logger.info(`dsh-llm-mlx: managed loopback server is healthy at ${endpoint}`)
-      return {
-        mode: 'spawned',
-        endpoint,
-        ...(child.pid === undefined ? {} : { pid: child.pid }),
-        dispose: () => terminate(child, exit, dependencies.sleep),
+  try {
+    while (dependencies.now() < deadline) {
+      if (await dependencies.isHealthy(healthUrl)) {
+        const identity = await dependencies.verifyModel(endpoint, config.modelPath)
+        if (exit.exited()) {
+          throw new Error(`dsh-llm-mlx: ${config.serverEngine} server stopped during startup (${exitDescription(await exit.promise)})`)
+        }
+        if (identity === 'mismatched') {
+          throw new Error(`dsh-llm-mlx: server at ${endpoint} reports a different model during managed startup`)
+        }
+        if (identity === 'matched') {
+          logger.info(`dsh-llm-mlx: managed loopback server is healthy with the configured model at ${endpoint}`)
+          return {
+            mode: 'spawned',
+            endpoint,
+            ...(child.pid === undefined ? {} : { pid: child.pid }),
+            dispose: () => terminate(child, exit, dependencies.sleep),
+          }
+        }
+      }
+      const state = await Promise.race([
+        exit.promise.then(value => ({ kind: 'exit' as const, value })),
+        dependencies.sleep(HEALTH_POLL_MS).then(() => ({ kind: 'tick' as const })),
+      ])
+      if (state.kind === 'exit') {
+        throw new Error(`dsh-llm-mlx: ${config.serverEngine} server stopped during startup (${exitDescription(state.value)})`)
       }
     }
-    const state = await Promise.race([
-      exit.promise.then(value => ({ kind: 'exit' as const, value })),
-      dependencies.sleep(HEALTH_POLL_MS).then(() => ({ kind: 'tick' as const })),
-    ])
-    if (state.kind === 'exit') {
-      throw new Error(`dsh-llm-mlx: ${config.serverEngine} server stopped during startup (${exitDescription(state.value)})`)
-    }
+    throw new Error(`dsh-llm-mlx: ${config.serverEngine} server did not become healthy with the configured model within ${String(config.startupTimeoutMs)} ms`)
+  } catch (error) {
+    await terminate(child, exit, dependencies.sleep)
+    throw error
   }
-
-  await terminate(child, exit, dependencies.sleep)
-  throw new Error(`dsh-llm-mlx: ${config.serverEngine} server did not become healthy within ${String(config.startupTimeoutMs)} ms`)
 }

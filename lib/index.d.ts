@@ -27,13 +27,13 @@ interface Config {
     autoStart?: boolean;
     /** Python server implementation used for managed startup. */
     serverEngine?: MlxServerEngine;
-    /** Absolute path to a local MLX model directory. Required when autoStart is true. */
+    /** Absolute local model path; required for autoStart and checked before reusing an existing service. */
     modelPath?: string;
     /** Python executable or absolute interpreter path containing the selected server package. */
     pythonExecutable?: string;
     /** Loopback TCP port used by both the server and provider profile. */
     port?: number;
-    /** Maximum time to wait for the server health endpoint. */
+    /** Maximum time to wait for server health and the configured model identity. */
     startupTimeoutMs?: number;
     /** Default generation limit passed to mlx_lm.server. */
     maxTokens?: number;
@@ -58,6 +58,7 @@ declare const Config: z<Config>;
 /** Resolve defaults and enforce the local-only process boundary. */
 declare function resolveConfig(config: Config): ResolvedConfig;
 
+type ModelIdentityStatus = 'matched' | 'mismatched' | 'unavailable';
 interface RuntimeLogger {
     info(message: string): void;
     warn(message: string): void;
@@ -73,6 +74,7 @@ interface RuntimeDependencies {
     readonly arch: string;
     inspectModel(modelPath: string): Promise<void>;
     isHealthy(url: string): Promise<boolean>;
+    verifyModel(endpoint: string, modelPath: string): Promise<ModelIdentityStatus>;
     isPortOpen(host: string, port: number): Promise<boolean>;
     spawnProcess(executable: string, args: readonly string[], env: NodeJS.ProcessEnv): ChildProcess;
     sleep(milliseconds: number): Promise<void>;
@@ -128,4 +130,4 @@ declare const name = "llm-mlx-runtime";
 /** Mount the optional server owner; the provider route itself comes from the bundle patch. */
 declare function apply(ctx: Context, config: Config): void;
 
-export { type CcSwitchProxyHandle, type CcSwitchProxyLogger, type CcSwitchProxyOptions, Config, Config as PluginConfig, type ResolvedConfig, type RuntimeDependencies, type RuntimeHandle, type RuntimeLogger, apply, buildServerArgs, endpointFor, ensureMlxRuntime, healthUrlFor, isHealthyPayload, name, normalizeCcSwitchOpenAiChunk, normalizeCcSwitchSseBlock, resolveConfig, sanitizeCcSwitchChatRequest, startCcSwitchCompatibilityProxy };
+export { type CcSwitchProxyHandle, type CcSwitchProxyLogger, type CcSwitchProxyOptions, Config, type ModelIdentityStatus, Config as PluginConfig, type ResolvedConfig, type RuntimeDependencies, type RuntimeHandle, type RuntimeLogger, apply, buildServerArgs, endpointFor, ensureMlxRuntime, healthUrlFor, isHealthyPayload, name, normalizeCcSwitchOpenAiChunk, normalizeCcSwitchSseBlock, resolveConfig, sanitizeCcSwitchChatRequest, startCcSwitchCompatibilityProxy };
