@@ -87,9 +87,23 @@ dsh web
 
 `DSH_MLX_MODEL_PATH` enables managed `mlx-lm` startup by default. The plugin
 checks for local model configuration, tokenizer configuration, and safetensors
-weights before it spawns Python. It reuses an already healthy server on port
-`18080`, refuses an occupied unhealthy port, and terminates only a server
-process that it started.
+weights before it spawns Python. When `modelPath` is set, reuse also requires
+matching model metadata from `/health` and `/v1/models`. A different model or
+unverifiable identity is reported without stopping or replacing the existing
+process. Managed startup waits for matching identity and cleans up its own
+child on startup failure. Occupied unhealthy ports are never taken over.
+
+MLX-VLM's loaded-model field takes precedence over its list of cached downloads.
+For MLX-LM, the unique absolute local-model path is compared with `modelPath`;
+cached Hub repo names do not identify its local default. Comparisons use whole,
+canonical paths, including symlink resolution. Ambiguous or malformed metadata
+is refused, and metadata reads have a one-second deadline and a 64 KiB limit.
+An external server configured without `modelPath` retains health-only reuse;
+set that path when the runtime should enforce an expected local model.
+
+This is a setup-time check of the server's declared identity. It does not
+attest model weights, prove which Python engine is running, or replace a real
+generation test. `serverEngine` selects the command for managed startup.
 
 For a persistent machine-local profile setting, add this to that profile's
 `cordis.patch.yml` instead of exporting variables:

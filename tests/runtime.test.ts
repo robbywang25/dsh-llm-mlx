@@ -29,6 +29,7 @@ function dependencies(overrides: Partial<RuntimeDependencies> = {}): RuntimeDepe
     arch: 'arm64',
     inspectModel: vi.fn(async () => undefined),
     isHealthy: vi.fn(async () => false),
+    verifyModel: vi.fn(async () => 'matched' as const),
     isPortOpen: vi.fn(async () => false),
     spawnProcess: vi.fn(() => childProcess()),
     sleep: vi.fn(async milliseconds => { clock += milliseconds }),
@@ -92,6 +93,29 @@ describe('ensureMlxRuntime', () => {
     const handle = await ensureMlxRuntime(resolveConfig({}), logger, deps)
     expect(handle.mode).toBe('reused')
     expect(deps.spawnProcess).not.toHaveBeenCalled()
+    expect(deps.verifyModel).not.toHaveBeenCalled()
+  })
+
+  it('verifies the configured model before reusing a healthy service', async () => {
+    const deps = dependencies({ isHealthy: vi.fn(async () => true) })
+    const handle = await ensureMlxRuntime(resolveConfig({ modelPath: '/models/qwen' }), logger, deps)
+    expect(handle.mode).toBe('reused')
+    expect(deps.verifyModel).toHaveBeenCalledExactlyOnceWith('http://127.0.0.1:18080/v1', '/models/qwen')
+    await handle.dispose()
+    expect(deps.spawnProcess).not.toHaveBeenCalled()
+    expect(deps.inspectModel).not.toHaveBeenCalled()
+  })
+
+  it.each(['mismatched', 'unavailable'] as const)('refuses %s identity without taking over a healthy process', async identity => {
+    const deps = dependencies({
+      isHealthy: vi.fn(async () => true),
+      verifyModel: vi.fn(async () => identity),
+    })
+    await expect(ensureMlxRuntime(
+      resolveConfig({ autoStart: true, modelPath: '/models/qwen' }), logger, deps,
+    )).rejects.toThrow(/existing process was not changed/)
+    expect(deps.spawnProcess).not.toHaveBeenCalled()
+    expect(deps.makeCacheDirectory).not.toHaveBeenCalled()
   })
 
   it('leaves the route visible but does not spawn when auto-start is disabled', async () => {
@@ -139,5 +163,56 @@ describe('ensureMlxRuntime', () => {
     expect(deps.spawnProcess).toHaveBeenCalledOnce()
     await handle.dispose()
     expect(child.kill).toHaveBeenCalledWith('SIGTERM')
+  })
+
+  it('waits for identity to become available during managed startup', async () => {
+    const deps = dependencies({
+      isHealthy: vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true),
+      verifyModel: vi.fn().mockResolvedValueOnce('unavailable').mockResolvedValueOnce('matched'),
+    })
+    const handle = await ensureMlxRuntime(resolveConfig({ autoStart: true, modelPath: '/models/qwen' }), logger, deps)
+    expect(handle.mode).toBe('spawned')
+    expect(deps.verifyModel).toHaveBeenCalledTimes(2)
+    await handle.dispose()
+  })
+
+  it.each(['mismatched', 'unavailable'] as const)('cleans up its own child when startup identity is %s', async identity => {
+    const child = childProcess()
+    const deps = dependencies({
+      isHealthy: vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true),
+      verifyModel: vi.fn(async () => identity),
+      spawnProcess: vi.fn(() => child),
+    })
+    await expect(ensureMlxRuntime(
+      resolveConfig({ autoStart: true, modelPath: '/models/qwen', startupTimeoutMs: 1000 }), logger, deps,
+    )).rejects.toThrow(identity === 'mismatched' ? /different model/ : /configured model within/)
+    expect(deps.spawnProcess).toHaveBeenCalledOnce()
+    expect(child.kill).toHaveBeenCalledExactlyOnceWith('SIGTERM')
+  })
+
+  it('cleans up its own child if the identity probe throws unexpectedly', async () => {
+    const child = childProcess()
+    const deps = dependencies({
+      isHealthy: vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true),
+      verifyModel: vi.fn(async () => { throw new Error('synthetic probe failure') }),
+      spawnProcess: vi.fn(() => child),
+    })
+    await expect(ensureMlxRuntime(
+      resolveConfig({ autoStart: true, modelPath: '/models/qwen' }), logger, deps,
+    )).rejects.toThrow('synthetic probe failure')
+    expect(child.kill).toHaveBeenCalledExactlyOnceWith('SIGTERM')
+  })
+
+  it('does not mark a child ready if it exits during model verification', async () => {
+    const child = childProcess()
+    const deps = dependencies({
+      isHealthy: vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true),
+      verifyModel: vi.fn(async () => { child.emit('exit', 1, null); return 'matched' as const }),
+      spawnProcess: vi.fn(() => child),
+    })
+    await expect(ensureMlxRuntime(
+      resolveConfig({ autoStart: true, modelPath: '/models/qwen' }), logger, deps,
+    )).rejects.toThrow(/stopped during startup/)
+    expect(child.kill).not.toHaveBeenCalled()
   })
 })
