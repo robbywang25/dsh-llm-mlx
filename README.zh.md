@@ -32,17 +32,22 @@ OpenAI-compatible 服务；这种模式下 DSH 不拥有该进程。
 安装到 Web profile：
 
 ```bash
-dsh plugin --profile web add github:robbywang25/dsh-llm-mlx
+dsh plugin --profile web add https://github.com/robbywang25/dsh-llm-mlx/releases/download/v0.4.0/dsh-llm-mlx-0.4.0.tgz
 ```
 
 安装到 DSH Desktop profile：
 
 ```bash
-dsh plugin --profile desktop add github:robbywang25/dsh-llm-mlx
+dsh plugin --profile desktop add https://github.com/robbywang25/dsh-llm-mlx/releases/download/v0.4.0/dsh-llm-mlx-0.4.0.tgz
 ```
 
-包内包含已经构建好的 `lib/`，没有安装期 lifecycle script。市场条目正式发布后，
-也可从 dsh-market 安装。
+固定版本的 Release 包含已经构建好的 `lib/`，没有安装期 lifecycle script。
+也可通过 `github:robbywang25/dsh-llm-mlx` 安装 Git 源码。dsh-market 目录独立更新，
+使用时应核对条目中的制品版本。
+
+v0.4.0 的自定义 `RuntimeDependencies` 适配器需要提供 `verifyModel`。设置
+`modelPath` 时，内置适配器会校验服务器声明的模型元数据；身份未知或不匹配会拒绝
+复用。这不证明权重内容或生成质量。可选代理的预算和中断响应行为见下文。
 
 ## 方案 A：复用已有 MLX 服务
 

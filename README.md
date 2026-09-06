@@ -33,17 +33,24 @@ at `http://127.0.0.1:18080/v1`; in that mode DSH does not own its process.
 For the Web profile:
 
 ```bash
-dsh plugin --profile web add github:robbywang25/dsh-llm-mlx
+dsh plugin --profile web add https://github.com/robbywang25/dsh-llm-mlx/releases/download/v0.4.0/dsh-llm-mlx-0.4.0.tgz
 ```
 
 For DSH Desktop's profile:
 
 ```bash
-dsh plugin --profile desktop add github:robbywang25/dsh-llm-mlx
+dsh plugin --profile desktop add https://github.com/robbywang25/dsh-llm-mlx/releases/download/v0.4.0/dsh-llm-mlx-0.4.0.tgz
 ```
 
-The package ships committed `lib/` output and has no install lifecycle script.
-It can also be installed from dsh-market after the catalog entry is published.
+The versioned release includes compiled `lib/` output and has no install lifecycle
+script. Git source installation is also available with `github:robbywang25/dsh-llm-mlx`.
+The dsh-market catalog is updated separately; check the artifact version in its entry.
+
+In v0.4.0, custom `RuntimeDependencies` adapters must provide `verifyModel`.
+The built-in adapter checks server-declared model metadata when `modelPath` is set;
+an unknown or different model now fails reuse. This does not attest to model weights
+or generation quality. The optional proxy's limits and interrupted-response behavior
+are described below.
 
 ## Option A: reuse an existing MLX server
 
